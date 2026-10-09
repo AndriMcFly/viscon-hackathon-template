@@ -1,41 +1,14 @@
 services:
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    build: ./backend
     env_file:
       - .env
-    environment:
-      USE_MOCK_AUTHENTICATION: false # Set to `true` to enable mock authentication
-    expose:
-      - 8000
-    labels:
-      traefik.enable: true
-      traefik.http.routers.backend.entrypoints: web
-      traefik.http.routers.backend.rule: PathPrefix(`/api`)
-      traefik.http.services.backend.loadbalancer.server.port: 8000
     restart: unless-stopped
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    expose:
-      - 80
-    labels:
-      traefik.enable: true
-      traefik.http.routers.frontend.entrypoints: web
-      traefik.http.routers.frontend.rule: PathPrefix(`/`)
-      traefik.http.services.frontend.loadbalancer.server.port: 80
-    restart: unless-stopped
-
-  traefik:
-    image: traefik
-    command:
-      - --providers.docker=true
-      - --entrypoints.web.address=:8080
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+    build: ./frontend
     ports:
-      - 8080:8080
+      - 8080:8080 # The VIScon portal forwards your team's address to this port
+    depends_on:
+      - backend
     restart: unless-stopped

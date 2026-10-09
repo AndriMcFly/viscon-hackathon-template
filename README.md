@@ -2,41 +2,74 @@
 
 Welcome, hackers, to the VIScon Hackathon!
 
-This repository is a template for your hackathon project. It includes a
-basic structure for your project, as well as some resources to help you
-get started.
-
-Feel free to modify this template as you see fit or yeet it completely :)
-
-## Project Overview
-
-This template provides a solid starting point for your hackathon project, featuring:
-
-- **Frontend:** A simple React application.
-- **Backend:** A Python backend built with the **FastAPI** framework.
-- **AI Integration:** An AI-powered endpoint that generates structured data from natural language prompts using `litellm`.
-- **Proxy:** A Traefik reverse proxy to route traffic seamlessly.
-
-Everything is containerized with Docker, so you can get up and running with a single command.
+This repository is a small but complete example app: a React frontend, a
+Python (FastAPI) backend with an AI-powered endpoint, and a web server (Caddy)
+that ties them together. It's meant to show you all the moving parts, so
+read it, change it, or yeet it completely :)
 
 ## Quick Start
 
-To start all the services, simply run:
-
 ```bash
+cp .env.sample .env
+# In .env: add your team's API key
 docker compose up --build
 ```
 
-This will build the containers and start the frontend, backend, and proxy. The application will then be available at:
+Then open:
 
-- **Frontend:** [`http://localhost:8080`](http://localhost:8080)
-- **Backend API:** [`http://localhost:8080/api`](http://localhost:8080/api)
+- **App:** http://localhost:8080
+- **API docs:** http://localhost:8080/api/docs
 
-## Backend (FastAPI)
+## On Your Team VM
 
-The backend is a Python application built with the **FastAPI** framework. It provides a REST API for a multi-user todo list and includes an AI-powered feature.
+The template is already running on your team VM, in `~/template`, at your
+team's address (see your team page in the portal). Its `.env` is prefilled,
+including a shared LLM key.
 
-The backend code is located in the `/backend` directory. You can start it independently by running:
+> [!IMPORTANT]
+> The shared LLM key is only for trying out the demo and has a very limited
+> quota. For development and for your deployed app, use your team's own key:
+> set it as `LLM_API_KEY` in `.env`.
+
+After changing code or `.env`, redeploy with:
+
+```bash
+cd ~/template
+docker compose up -d --build
+```
+
+- The portal forwards your team's address to port 8080 on the VM. If you
+  change the port, change it in the portal's network configuration too.
+- If you set the portal's access control to "Disabled", your app is public
+  and receives no user headers, so all visitors share one "Guest" user and
+  its todo list. Change `extract_user()` in [`backend/app.py`](backend/app.py)
+  if you want something else.
+- Dev servers on the VM aren't reachable from outside. Forward the port over
+  SSH, e.g. `ssh -L 5173:localhost:5173 viscon@<your VM>` (VS Code Remote-SSH
+  does this automatically).
+
+The portal's documentation covers the network configuration in more detail.
+
+## Configuration
+
+All configuration lives in the `.env` file in the project root (see [`.env.sample`](.env.sample)).
+
+| Variable       | Description                                                             |
+| :------------- | :---------------------------------------------------------------------- |
+| `LLM_API_BASE` | URL of an OpenAI-compatible API. Defaults to the hackathon's LLM proxy. |
+| `LLM_API_KEY`  | Your team's API key. The prefilled shared key is for the demo only.     |
+| `LLM_MODEL`    | The model id to use.                                                    |
+
+Want to use OpenAI (or any other OpenAI-compatible provider) directly? Set
+`LLM_API_BASE=https://api.openai.com/v1` and use your own key.
+
+## Local Development (without Docker)
+
+For fast iteration with hot reloading, run the backend and frontend directly
+in two terminals. The team VMs come with the right versions (Python 3.14,
+Node 24).
+
+**Backend** (reads the root `.env` automatically):
 
 ```bash
 cd backend
@@ -47,11 +80,36 @@ pip install -r requirements.txt
 python app.py
 ```
 
-You can then get started by visiting http://localhost:8000/api/docs.
+**Frontend:**
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Then open http://localhost:5173. The dev server forwards all `/api` requests
+to the backend on port 8000 (see [`vite.config.ts`](frontend/vite.config.ts)).
+
+No authentication headers are added locally, so you're logged in as "Guest".
+To test as a specific user, send `X-User-Id` and `X-User-Name` yourself, e.g.
+`curl localhost:8000/api/me -H 'X-User-Id: einstein@ethz.ch' -H 'X-User-Name: Albert Einstein'`.
+
+## Backend
+
+A Python [FastAPI](https://fastapi.tiangolo.com/) app that provides a REST API
+for a multi-user todo list. Todos are stored in memory, so they're gone after a
+restart. Plug in a database when you need one.
+
+| File                             | Purpose                                     |
+| :------------------------------- | :------------------------------------------ |
+| [`app.py`](backend/app.py)       | API endpoints, authentication and app state |
+| [`models.py`](backend/models.py) | Data models (Pydantic)                      |
+| [`ai.py`](backend/ai.py)         | LLM call that turns a prompt into a todo    |
 
 ### API Endpoints
 
-The following endpoints are available. Note that the `/api` prefix is required for all backend routes.
+All backend routes start with `/api`. Interactive docs are available at `/api/docs`.
 
 | Method   | Path                   | Description                                         |
 | :------- | :--------------------- | :-------------------------------------------------- |
@@ -63,49 +121,78 @@ The following endpoints are available. Note that the `/api` prefix is required f
 
 ### Authentication
 
-By default, authentication is handled by the VIScon platform's central proxy. When a user logs into the platform, these headers are automatically added to requests forwarded to your application.
+When deployed, authentication is handled by the VIScon portal. When a user
+logs in, the portal adds these headers to every request forwarded to your app:
 
-The following headers are expected on requests to the `/api` endpoints:
+- `X-User-Id`: The user's email address, which uniquely identifies them.
+- `X-User-Name`: The user's full name, with non-ASCII characters
+  percent-encoded (`Zo%C3%AB` for "Zoë").
 
-- `X-User-Id`: A unique identifier for the user.
-- `X-User-Name`: The user's full name.
+The backend reads and decodes them in `extract_user()` and uses `X-User-Id`
+to keep a separate todo list for each user. Requests without these headers
+(locally, or with the portal's access control disabled) all share one "Guest"
+user.
 
-The backend uses the `X-User-Id` to maintain a separate todo list for each user.
+Only trust these headers while port 8080 is reachable through the portal
+alone, which is the default. If you open the port in your VM's firewall,
+anyone can call your app directly and send fake headers.
 
 ### AI-Powered Todo Generation
 
-We've integrated an AI service using `litellm` to generate structured todo items from natural language.
+`GET /api/todos/generate` sends your prompt to an LLM using the
+[`openai`](https://github.com/openai/openai-python) Python package and asks for
+an answer in the shape of a todo item (structured output). The prompt includes
+a few examples to show the model what we expect ("few-shot prompting").
 
-This feature requires credentials for an LLM proxy. To enable it, ensure that the `.env` file in the root directory of the project contains you team-specific API key.
+If the LLM can't be reached (e.g. the API key is missing), the endpoint logs
+the error and returns a todo prefilled with your prompt, so the app keeps
+working.
 
-```ini
-# .env
-...
-LITELLM_PROXY_API_KEY=your-secret-api-key
+## Frontend
+
+A [React](https://react.dev/) app written in TypeScript and built with
+[Vite](https://vite.dev/). It talks to the backend with the browser's `fetch`
+API.
+
+| File                                         | Purpose                                   |
+| :------------------------------------------- | :---------------------------------------- |
+| [`src/App.tsx`](frontend/src/App.tsx)        | Main component, loads the current user    |
+| [`src/api.ts`](frontend/src/api.ts)          | All backend requests and their types      |
+| [`src/components/`](frontend/src/components) | UI components (header, todo form & table) |
+| [`public/`](frontend/public)                 | Static files like images, served as-is    |
+
+Useful commands (run in `frontend/`):
+
+- `npm run dev`: start the dev server with hot reloading
+- `npm run build`: type-check and build for production into `dist/`
+- `npm run lint`: check the code with ESLint
+
+## Project Structure
+
+```
+.
+├── docker-compose.yml   # The two services: backend and frontend
+├── .env.sample          # Configuration template, copy to .env
+├── backend/             # FastAPI app (see "Backend")
+│   └── Dockerfile
+└── frontend/            # React app (see "Frontend")
+    ├── Caddyfile        # Routing: /api to the backend, the rest to the React app
+    └── Dockerfile       # Builds the app, then serves it with Caddy
 ```
 
-## Frontend (React)
+## Adding a Service
 
-The frontend is a simple React app that displays some information and hosts a todo list app. It is written in TypeScript, and the backend requests are made using the `fetch` API.
+All traffic enters through Caddy on port 8080, configured in
+[`frontend/Caddyfile`](frontend/Caddyfile). To add a service (say, a second
+API under `/ml`), add it to [`docker-compose.yml`](docker-compose.yml) and
+give it its own `handle` block in the Caddyfile, next to the `/api` one:
 
-The frontend code is located in the `/frontend` directory. You can start it independently by running:
-
-```bash
-cd frontend
-npm install
-
-npm run dev
+```
+handle /ml/* {
+	reverse_proxy ml:5000
+}
 ```
 
-You can then get started by visiting http://localhost:3000.
-
-## Proxy (Traefik)
-
-The project uses Traefik as a reverse proxy. It acts as the single entry point for the application, listening on `http://localhost:8080`.
-
-Its main responsibilities are:
-
-- Routing requests starting with `/api` to the backend service.
-- Routing all other requests (`/`) to the frontend service.
-
-The configuration is done via Docker labels in the `docker-compose.yml` file, so you can easily add new services and routing rules.
+Containers reach each other by their service name (`backend`, `ml`, …).
+Rebuild with `docker compose up --build`. For local development, add the
+same prefix to the proxy in [`vite.config.ts`](frontend/vite.config.ts).
