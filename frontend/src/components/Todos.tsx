@@ -1,32 +1,30 @@
 import { useEffect, useState } from "react";
-import { getMe, getTodos, type TodoItem, type User } from "../apiClient";
+import { getTodos, type TodoItem, type User } from "../api";
 import TodoForm from "./TodoForm";
 import TodoTable from "./TodoTable";
 import "./Todos.css";
 
-const Todos = () => {
-  const [me, setMe] = useState<User | undefined>();
+interface TodosProps {
+  me?: User;
+}
+
+const Todos = ({ me }: TodosProps) => {
   const [todos, setTodos] = useState<TodoItem[]>([]);
 
-  async function updateMe() {
-    setMe(await getMe());
-  }
-
-  async function updateTodos() {
-    setTodos(await getTodos());
+  function updateTodos() {
+    getTodos().then(setTodos);
   }
 
   useEffect(() => {
-    updateMe();
     updateTodos();
   }, []);
 
   return (
-    <div className="todos">
-      <h1>Todos {me && <>of {me.name}</>}</h1>
+    <main className="todos">
+      <h2>{me ? `Todos of ${me.name}` : "Your todos"}</h2>
       <TodoForm onTodoCreated={updateTodos} />
       <TodoTable todos={todos} onTodoDeleted={updateTodos} />
-    </div>
+    </main>
   );
 };
 

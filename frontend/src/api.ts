@@ -1,6 +1,5 @@
 export interface User {
-  email: string;
-  username: string;
+  id: string;
   name: string;
 }
 
@@ -56,12 +55,19 @@ async function request<T>(
   return response.json();
 }
 
+// JSON has no date type, so the backend sends deadlines as strings
+function parseDeadline<T extends { deadline: Date }>(todo: T): T {
+  return { ...todo, deadline: new Date(todo.deadline) };
+}
+
 export function getMe(): Promise<User> {
   return request(`/api/me`, "GET");
 }
 
 export function getTodos(): Promise<TodoItem[]> {
-  return request(`/api/todos`, "GET");
+  return request<TodoItem[]>(`/api/todos`, "GET").then((todos) =>
+    todos.map(parseDeadline),
+  );
 }
 
 export function createTodo(
@@ -69,17 +75,18 @@ export function createTodo(
   description: string,
   deadline: Date,
 ): Promise<TodoItem> {
-  return request(`/api/todos`, "POST", { title, description, deadline });
+  return request<TodoItem>(`/api/todos`, "POST", {
+    title,
+    description,
+    deadline,
+  }).then(parseDeadline);
 }
 
 export function generateTodo(prompt: string): Promise<TodoItemForCreate> {
   return request<TodoItemForCreate>(
     `/api/todos/generate?prompt=${encodeURIComponent(prompt)}`,
     "GET",
-  ).then((data) => {
-    data.deadline = new Date(data.deadline);
-    return data;
-  });
+  ).then(parseDeadline);
 }
 
 export function deleteTodo(id: number): Promise<void> {
