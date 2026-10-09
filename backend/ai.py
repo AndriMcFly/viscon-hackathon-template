@@ -62,7 +62,7 @@ def generate_todo(prompt: str) -> TodoItemForCreate | None:
     client = OpenAI(base_url=getenv("LLM_API_BASE"), api_key=getenv("LLM_API_KEY"))
 
     response = client.chat.completions.parse(
-        model=getenv("LLM_MODEL", "gpt-5.4-mini"),
+        model=getenv("LLM_MODEL", "openrouter/deepseek/deepseek-v4.1-flash"),
         messages=_generate_todo_messages(prompt),
         response_format=TodoItemForCreate,  # Force the LLM to answer in this structure
     )
