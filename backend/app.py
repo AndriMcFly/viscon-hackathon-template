@@ -1,9 +1,12 @@
+import asyncio
+from collections import defaultdict
 from datetime import datetime, timedelta
 from urllib.parse import unquote
 
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, status
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 import ai
 from models import TodoItem, TodoItemForCreate, User
@@ -73,6 +76,15 @@ class State:
 
 state = State()
 
+# Open live update streams per user id (one queue per open tab)
+listeners: dict[str, set[asyncio.Queue]] = defaultdict(set)
+
+
+# Only call this from async endpoints: asyncio queues are not thread-safe
+def notify_todos_changed(user_id: str):
+    for queue in listeners[user_id]:
+        queue.put_nowait({"type": "todos_changed"})
+
 
 app = FastAPI(docs_url="/api/docs", openapi_url="/api/openapi.json")
 
@@ -102,15 +114,33 @@ def get_todos(request: Request):
 
 
 @app.post("/api/todos", response_model=TodoItem, status_code=status.HTTP_201_CREATED)
-def create_todo(request: Request, item: TodoItemForCreate):
+async def create_todo(request: Request, item: TodoItemForCreate):
     user = extract_user(request)
-    return state.create_todo(user.id, item)
+    todo = state.create_todo(user.id, item)
+    notify_todos_changed(user.id)
+    return todo
 
 
 @app.delete("/api/todos/{todo_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_todo(request: Request, todo_id: int):
+async def delete_todo(request: Request, todo_id: int):
     user = extract_user(request)
     state.delete_todo(user.id, todo_id)
+    notify_todos_changed(user.id)
+
+
+# Server-Sent Events: the response stays open and every yield sends an event to the browser.
+@app.get("/api/todos/events", response_class=EventSourceResponse)
+async def todo_events(request: Request):
+    user = extract_user(request)
+    queue = asyncio.Queue()
+    listeners[user.id].add(queue)
+    try:
+        # Send something right away, as some proxies (like Vite's) hold the response until then
+        yield ServerSentEvent(comment="connected")
+        while True:
+            yield await queue.get()
+    finally:
+        listeners[user.id].discard(queue)
 
 
 @app.get("/api/todos/generate", response_model=TodoItemForCreate)

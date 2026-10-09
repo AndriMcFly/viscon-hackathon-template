@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { getTodos, type TodoItem, type User } from "../api";
+import {
+  getTodos,
+  subscribeToTodoChanges,
+  type TodoItem,
+  type User,
+} from "../api";
 import TodoForm from "./TodoForm";
 import TodoTable from "./TodoTable";
 import "./Todos.css";
@@ -18,6 +23,9 @@ const Todos = ({ me }: TodosProps) => {
   useEffect(() => {
     updateTodos();
   }, []);
+
+  // Live updates: refetch when the todos change in another tab
+  useEffect(() => subscribeToTodoChanges(updateTodos), []);
 
   return (
     <main className="todos">

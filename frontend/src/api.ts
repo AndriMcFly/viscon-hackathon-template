@@ -92,3 +92,16 @@ export function generateTodo(prompt: string): Promise<TodoItemForCreate> {
 export function deleteTodo(id: number): Promise<void> {
   return request(`/api/todos/${id}`, "DELETE");
 }
+
+// Calls onChange whenever the todos change, e.g. in another tab.
+// Returns a function that stops listening (use it as the useEffect cleanup).
+export function subscribeToTodoChanges(onChange: () => void): () => void {
+  // Server-Sent Events: the browser keeps the request open and reconnects by itself
+  const events = new EventSource("/api/todos/events");
+  events.onmessage = (event) => {
+    if (JSON.parse(event.data).type === "todos_changed") {
+      onChange();
+    }
+  };
+  return () => events.close();
+}

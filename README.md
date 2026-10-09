@@ -118,6 +118,7 @@ All backend routes start with `/api`. Interactive docs are available at `/api/do
 | `POST`   | `/api/todos`           | Create a new todo for the current user.             |
 | `DELETE` | `/api/todos/{todo_id}` | Delete a specific todo by its ID.                   |
 | `GET`    | `/api/todos/generate`  | Suggests a new todo from a natural language prompt. |
+| `GET`    | `/api/todos/events`    | Event stream that tells you when your todos change. |
 
 ### Authentication
 
@@ -148,11 +149,52 @@ If the LLM can't be reached (e.g. the API key is missing), the endpoint logs
 the error and returns a todo prefilled with your prompt, so the app keeps
 working.
 
+### Live Updates (Server-Sent Events)
+
+Open the app in two tabs side by side and add a todo in one: it shows up in
+the other right away. Each tab keeps a request to `/api/todos/events` open.
+When a todo is created or deleted, the backend sends
+`{"type": "todos_changed"}` to all open streams of that user, and the tabs
+reload their todos over the normal REST API.
+
+- Backend: `todo_events()` and `notify_todos_changed()` in
+  [`app.py`](backend/app.py), using FastAPI's `EventSourceResponse`. FastAPI
+  also sends a keep-alive ping every 15 seconds so proxies don't close idle
+  streams.
+- Frontend: `subscribeToTodoChanges()` in
+  [`api.ts`](frontend/src/api.ts) uses the browser's
+  `EventSource`, which reconnects by itself (e.g. when the backend restarts).
+
+Why not WebSockets? Server-Sent Events are plain HTTP, so they pass every
+proxy between the browser and your VM. WebSockets currently don't make it
+through the hackathon's network (you get a `502 Bad Gateway` when deployed),
+even though they work locally. For server-to-browser updates like these, you
+don't need them: send data the other way with normal `fetch` requests.
+
+Prefer a library? [Socket.IO](https://socket.io/) works too, e.g. for chat
+rooms. When deployed, it automatically uses its built-in HTTP long-polling
+transport. A few tips to get it running:
+
+- **Keep the default transports**, so Socket.IO can pick long-polling by
+  itself. Many tutorials set `transports: ["websocket"]`; just leave that out.
+- **Mount it under `/api`**, so its requests reach the backend:
+  `socketio_path="/api/socket.io"` on the server and
+  `path: "/api/socket.io"` on the client.
+- **Run a single backend process**, as the template already does, so all
+  requests of a connection reach the same process.
+- Each message is a regular HTTP request, which is plenty for chats,
+  notifications and similar features.
+
+Open streams live in memory in the backend process, like the todos. With
+several workers or replicas, each only knows its own streams. Locally, browsers
+allow only 6 open connections per host, so with many tabs open on the dev
+server, requests start to hang (deployed, HTTP/2 lifts this limit).
+
 ## Frontend
 
 A [React](https://react.dev/) app written in TypeScript and built with
 [Vite](https://vite.dev/). It talks to the backend with the browser's `fetch`
-API.
+API and gets live updates with `EventSource`.
 
 | File                                         | Purpose                                   |
 | :------------------------------------------- | :---------------------------------------- |
